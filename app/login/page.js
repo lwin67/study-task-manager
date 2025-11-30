@@ -86,11 +86,6 @@ function LoginForm() {
           </Link>
         </div>
       </form>
-
-      <p className="text-muted" style={{ marginTop: "10px" }}>
-        In your demo, you can explain that protected pages redirect back here if
-        the user isn&apos;t logged in 🔐
-      </p>
     </main>
   );
 }
