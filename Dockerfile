@@ -1,6 +1,9 @@
 # ---------- Build & runtime image for Next.js + Prisma ----------
 FROM node:20-alpine
 
+# ✅ Install OpenSSL 1.1 compatibility so Prisma can load libssl.so.1.1
+RUN apk add --no-cache openssl1.1-compat
+
 # Set working directory
 WORKDIR /app
 
@@ -15,7 +18,7 @@ COPY . .
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1
 
-# Generate Prisma client (postinstall also does this, but this is safe)
+# Generate Prisma client
 RUN npx prisma generate
 
 # Build Next.js app
