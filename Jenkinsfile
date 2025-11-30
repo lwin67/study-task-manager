@@ -1,28 +1,9 @@
 pipeline {
   agent any
 
+  // Auto-trigger on new commits (fallback if no webhook)
   triggers {
-    // Poll SCM every 2 minutes (fallback if no webhook)
     pollSCM('H/2 * * * *')
-  }
-
-  environment {
-    // Build info
-    BUILD_TAG = "${env.BUILD_NUMBER}"
-    GIT_COMMIT_SHORT = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-  }
-
-  parameters {
-    booleanParam(
-      name: 'CLEAN_VOLUMES',
-      defaultValue: false,
-      description: 'Remove volumes (clears database)'
-    )
-    string(
-      name: 'APP_HOST',
-      defaultValue: 'http://192.168.56.1:3000',
-      description: 'Deployed app URL for reference.'
-    )
   }
 
   stages {
@@ -30,10 +11,8 @@ pipeline {
     stage('Checkout') {
       steps {
         script {
-          echo "Checking out code."
+          echo "Checking out source code..."
           checkout scm
-          echo "Deploying Study Task Manager"
-          echo "Build: ${BUILD_TAG}, Commit: ${GIT_COMMIT_SHORT}"
         }
       }
     }
@@ -41,7 +20,7 @@ pipeline {
     stage('Validate Docker Compose') {
       steps {
         script {
-          echo "Validating Docker Compose configuration."
+          echo "Validating docker-compose.yml..."
           sh 'docker compose config'
         }
       }
@@ -50,39 +29,26 @@ pipeline {
     stage('Prepare Environment') {
       steps {
         script {
-          echo "Preparing .env configuration for Docker Compose."
+          echo "Creating .env file from Jenkins credentials..."
 
-          // Load credentials from Jenkins
+          // Jenkins credentials (Secret text):
+          //  - DATABASE_URL : full TiDB connection URL
+          //  - AUTH_SECRET  : auth secret for your app
           withCredentials([
-            string(credentialsId: 'MYSQL_ROOT_PASSWORD', variable: 'MYSQL_ROOT_PASS'),
-            string(credentialsId: 'MYSQL_PASSWORD',      variable: 'MYSQL_PASS'),
-            string(credentialsId: 'AUTH_SECRET',         variable: 'AUTH_SECRET_VALUE')
+            string(credentialsId: 'DATABASE_URL', variable: 'DATABASE_URL_VALUE'),
+            string(credentialsId: 'AUTH_SECRET',  variable: 'AUTH_SECRET_VALUE')
           ]) {
 
             sh """
 cat > .env <<EOF
-# MySQL
-MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASS}
-MYSQL_DATABASE=studytasks_db
-MYSQL_USER=studytasks_user
-MYSQL_PASSWORD=${MYSQL_PASS}
-MYSQL_PORT=3306
-
-# phpMyAdmin
-PHPMYADMIN_PORT=8888
-
-# App
-FRONTEND_PORT=3000
+DATABASE_URL=${DATABASE_URL_VALUE}
 AUTH_SECRET=${AUTH_SECRET_VALUE}
 AUTH_TRUST_HOST=true
-
-# Prisma / Next.js DB URL (app connects to db service)
-DATABASE_URL=mysql://studytasks_user:${MYSQL_PASS}@db:3306/studytasks_db
 EOF
 """
           }
 
-          echo ".env file created (values hidden from logs)."
+          echo ".env file created (values not printed in logs)."
         }
       }
     }
@@ -90,23 +56,18 @@ EOF
     stage('Deploy with Docker Compose') {
       steps {
         script {
-          echo "Deploying stack with Docker Compose."
+          echo "Stopping existing containers (if any)..."
+          // -v here is optional; remove if you don't want to clear anonymous volumes
+          sh 'docker compose down || true'
 
-          // Stop existing containers
-          def downCommand = 'docker compose down'
-          if (params.CLEAN_VOLUMES) {
-            echo "WARNING: Removing volumes (database will be cleared)."
-            downCommand = 'docker compose down -v'
-          }
-          sh downCommand
+          echo "Building Docker image for study-task-manager..."
+          sh 'docker compose build --no-cache'
 
-          // Build and start
-          sh """
-            docker compose build --no-cache
-            docker compose up -d
-          """
+          echo "Starting containers with Docker Compose..."
+          sh 'docker compose up -d'
 
-          echo "Docker Compose deployment triggered."
+          echo "Current container status:"
+          sh 'docker compose ps'
         }
       }
     }
@@ -114,42 +75,38 @@ EOF
     stage('Health Check') {
       steps {
         script {
-          echo "Waiting for app to start..."
-          sh 'sleep 20'
+          echo "Waiting for app to become healthy on http://localhost:3000 ..."
 
-          echo "Checking container status."
-          sh 'docker compose ps'
-
-          echo "Performing HTTP health check on Next.js app."
+          // Wait up to ~60 seconds, retrying until HTTP 2xx
           sh """
-            # Wait up to 60s for the homepage to respond with 2xx
-            timeout 60 bash -c 'until curl -f http://localhost:3000/; do
-              echo "Waiting for app...";
-              sleep 3;
-            done' || exit 1
-
-            echo "Health check passed!"
+            timeout 60 bash -c '
+              until curl -fsS http://localhost:3000/ > /dev/null; do
+                echo "App not ready yet, retrying in 3s...";
+                sleep 3;
+              done
+            '
           """
+
+          echo "Health check passed! App is responding on /"
         }
       }
     }
 
-    stage('Verify Deployment') {
+    stage('Show Logs & Info') {
       steps {
         script {
-          echo "Verifying services and showing logs."
+          echo "Showing container status and recent logs..."
           sh """
-            echo "=== Container Status ==="
+            echo "=== docker compose ps ==="
             docker compose ps
             echo ""
-            echo "=== Recent Logs (last 20 lines) ==="
-            docker compose logs --tail=20
-            echo ""
-            echo "App should be accessible at:"
-            echo " - Local (VM):  http://localhost:3000"
-            echo " - From host:   ${params.APP_HOST}"
-            echo " - phpMyAdmin:  http://localhost:8888"
+            echo "=== docker compose logs (last 30 lines) ==="
+            docker compose logs --tail=30 || true
           """
+
+          echo "If this is a VM, app should be reachable at:"
+          echo "  - Inside VM:  http://localhost:3000"
+          echo "  - From host:  http://<VM-IP>:3000  (e.g. http://192.168.56.1:3000)"
         }
       }
     }
@@ -157,21 +114,24 @@ EOF
 
   post {
     success {
-      echo "✅ Deployment successful."
-      echo "Build: ${BUILD_TAG}, Commit: ${GIT_COMMIT_SHORT}"
+      script {
+        echo "✅ CI/CD pipeline finished successfully."
+      }
     }
     failure {
-      echo "❌ Deployment failed. Showing logs:"
       script {
+        echo "❌ CI/CD pipeline failed. Showing last logs for debugging..."
         sh 'docker compose logs --tail=50 || true'
       }
     }
     always {
-      echo "Cleaning up unused Docker resources…"
-      sh """
-        docker image prune -f
-        docker container prune -f
-      """
+      script {
+        echo "Cleaning up unused Docker resources (images/containers)..."
+        sh """
+          docker image prune -f || true
+          docker container prune -f || true
+        """
+      }
     }
   }
 }

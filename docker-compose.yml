@@ -1,55 +1,16 @@
 services:
-  db:
-    image: mysql:8.0
-    container_name: studytasks_mysql
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      TZ: Asia/Bangkok
-    ports:
-      # Expose MySQL only to host (optional for debugging)
-      - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-      # Optional: if you later create init.sql to auto-create tables, mount it here:
-      # - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    networks: [stack]
-
-  phpmyadmin:
-    image: phpmyadmin/phpmyadmin:latest
-    container_name: studytasks_phpmyadmin
-    restart: unless-stopped
-    environment:
-      PMA_HOST: db
-      PMA_PORT: 3306
-      UPLOAD_LIMIT: 256M
-    ports:
-      - "${PHPMYADMIN_PORT:-8888}:80"
-    depends_on: [db]
-    networks: [stack]
-
   app:
     build: .
     container_name: studytasks_app
     restart: unless-stopped
     environment:
-      NODE_ENV: production
-      # Prisma / Next.js DB connection (Jenkins will generate this)
       DATABASE_URL: ${DATABASE_URL}
-      # Auth.js / NextAuth
       AUTH_SECRET: ${AUTH_SECRET}
       AUTH_TRUST_HOST: "true"
+      NODE_ENV: production
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
-    depends_on:
-      - db
+      - "3000:3000"
     networks: [stack]
-
-volumes:
-  mysql_data:
 
 networks:
   stack:
