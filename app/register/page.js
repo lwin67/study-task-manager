@@ -96,11 +96,6 @@ export default function RegisterPage() {
           </Link>
         </div>
       </form>
-
-      <p className="text-muted" style={{ marginTop: "10px" }}>
-        You can show this page in your demo as the starting point of the user
-        journey 💁‍♀️
-      </p>
     </main>
   );
 }
