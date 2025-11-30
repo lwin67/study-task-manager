@@ -1,8 +1,9 @@
 # ---------- Build & runtime image for Next.js + Prisma ----------
-FROM node:20-alpine
+# Use Debian-based Node image instead of Alpine to avoid OpenSSL 1.1 issues
+FROM node:20
 
-# ✅ Install OpenSSL 1.1 compatibility so Prisma can load libssl.so.1.1
-RUN apk add --no-cache openssl1.1-compat
+# (Optional but nice) update and install openssl explicitly
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
