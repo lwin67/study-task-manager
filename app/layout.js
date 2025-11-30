@@ -32,7 +32,7 @@ export default function RootLayout({ children }) {
                 <span className="brand-text">Study Task Manager</span>
               </Link>
               <span className="brand-subtitle">
-                Minimal, sharp, and built to ship your work.
+                Simple, sharp, and built to ship your study tasks.
               </span>
             </header>
 
